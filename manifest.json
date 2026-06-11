@@ -5,8 +5,8 @@
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "you",
+    "author": "howardsierra",
     "version": "1.0.0",
-    "homePage": "",
+    "homePage": "https://github.com/howardsierra/contextlens",
     "auto_update": false
 }
