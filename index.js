@@ -40,6 +40,8 @@
     let lastActivatedWI = [];   // entries captured from WORLD_INFO_ACTIVATED
     let lastAnalysis = null;    // result of the most recent prompt analysis
     let analyzing = false;
+    let pendingChat = null;     // newest prompt that arrived mid-analysis
+    let initialized = false;
 
     /* ------------------------------------------------------------------ */
     /* Helpers                                                             */
@@ -142,7 +144,10 @@
      * @param {Array<{role:string, content:any, name?:string}>} chat
      */
     async function analyze(chat) {
-        if (analyzing) return;
+        // Token counting is async, so prompts (dry runs especially) can arrive
+        // while we're still busy. Keep only the newest and run it afterwards,
+        // instead of dropping it — otherwise the real generation can be lost.
+        if (analyzing) { pendingChat = chat; return; }
         analyzing = true;
         try {
             const c = ctx();
@@ -230,8 +235,15 @@
                 when: new Date(),
             };
             render();
+        } catch (e) {
+            console.error('[Context Lens] analysis failed', e);
         } finally {
             analyzing = false;
+        }
+        if (pendingChat) {
+            const next = pendingChat;
+            pendingChat = null;
+            analyze(next);
         }
     }
 
@@ -347,6 +359,27 @@
     /* Panel construction & dragging                                       */
     /* ------------------------------------------------------------------ */
 
+    /**
+     * Position the panel, clamped so it stays on screen.
+     * The saved position syncs across devices via the server settings, so a
+     * spot picked on a wide monitor can be far off-screen on a laptop/phone.
+     */
+    function moveTo(el, x, y) {
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.style.right = 'auto';
+        // Measure the real on-screen box (SillyTavern transforms <html>, so
+        // left/top aren't exactly viewport coordinates) and nudge it back in.
+        const r = el.getBoundingClientRect();
+        if (!r.width) return; // hidden — re-clamped when opened
+        const dx = Math.max(0, -r.left) || Math.min(0, window.innerWidth - r.right);
+        const dy = Math.max(0, -r.top) || Math.min(0, window.innerHeight - r.bottom);
+        if (dx || dy) {
+            el.style.left = `${Math.max(0, x + dx)}px`;
+            el.style.top = `${Math.max(0, y + dy)}px`;
+        }
+    }
+
     function buildPanel() {
         if (panel()) return;
         const el = document.createElement('div');
@@ -360,11 +393,10 @@
         document.body.appendChild(el);
 
         const s = settings();
-        if (s.x !== null && s.y !== null) {
-            el.style.left = `${s.x}px`;
-            el.style.top = `${s.y}px`;
-            el.style.right = 'auto';
-        }
+        if (Number.isFinite(s.x) && Number.isFinite(s.y)) moveTo(el, s.x, s.y);
+        window.addEventListener('resize', () => {
+            if (el.style.left) moveTo(el, parseFloat(el.style.left), parseFloat(el.style.top));
+        });
 
         el.querySelector('.ctxlens-close').addEventListener('click', () => togglePanel(false));
 
@@ -378,9 +410,7 @@
         });
         head.addEventListener('pointermove', (e) => {
             if (!drag) return;
-            el.style.left = `${Math.max(0, e.clientX - drag.dx)}px`;
-            el.style.top = `${Math.max(0, e.clientY - drag.dy)}px`;
-            el.style.right = 'auto';
+            moveTo(el, e.clientX - drag.dx, e.clientY - drag.dy);
         });
         head.addEventListener('pointerup', () => {
             if (!drag) return;
@@ -396,9 +426,12 @@
         buildPanel();
         const s = settings();
         s.open = force ?? !s.open;
-        panel().classList.toggle('ctxlens-open', s.open);
+        const el = panel();
+        el.classList.toggle('ctxlens-open', s.open);
         ctx().saveSettingsDebounced();
-        if (s.open) render();
+        if (!s.open) return;
+        render();
+        if (el.style.left) moveTo(el, parseFloat(el.style.left), parseFloat(el.style.top));
     }
 
     /* ------------------------------------------------------------------ */
@@ -418,7 +451,18 @@
     }
 
     function init() {
+        // APP_READY re-fires for late listeners, and we also call init()
+        // directly when the menu already exists — only wire things up once.
+        if (initialized) return;
+        initialized = true;
+
         const { eventSource, event_types } = ctx();
+
+        eventSource.on(event_types.GENERATION_STARTED, (_type, _opts, dryRun) => {
+            // WORLD_INFO_ACTIVATED only fires when something activates, so
+            // clear last turn's entries or they'd linger on quiet turns.
+            if (!dryRun) lastActivatedWI = [];
+        });
 
         eventSource.on(event_types.WORLD_INFO_ACTIVATED, (entries) => {
             lastActivatedWI = Array.isArray(entries) ? entries : [];
@@ -442,11 +486,26 @@
         console.log('[Context Lens] ready');
     }
 
-    // Wait for the app to be ready
-    if (window.SillyTavern?.getContext) {
+    function boot() {
         const { eventSource, event_types } = ctx();
         eventSource.once(event_types.APP_READY, init);
-        // If APP_READY already fired (extensions load late), init directly
+        // Extensions load after the wand menu is built; init right away so the
+        // launcher shows even if APP_READY was already emitted.
         if (document.getElementById('extensionsMenu')) init();
+    }
+
+    // Wait for the app to be ready
+    if (window.SillyTavern?.getContext) {
+        boot();
+    } else {
+        // Older SillyTavern builds don't expose the global; fall back to the
+        // module export (path is relative to scripts/extensions/third-party/<name>/).
+        import('../../../extensions.js')
+            .then(({ getContext }) => {
+                window.SillyTavern = window.SillyTavern || {};
+                window.SillyTavern.getContext = window.SillyTavern.getContext || getContext;
+                boot();
+            })
+            .catch(e => console.error('[Context Lens] could not find SillyTavern context — please update SillyTavern', e));
     }
 })();
