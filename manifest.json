@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "howardsierra",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "homePage": "https://github.com/howardsierra/contextlens",
     "auto_update": false
 }
