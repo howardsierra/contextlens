@@ -35,6 +35,17 @@ You can also toggle it with `/contextlens` (alias `/ctxlens`).
 - Collapse it to a slim header bar that still shows the fill % and a progress line
 - Every section folds away, and the folded state is remembered
 
+### On phones and touch screens
+
+- On narrow screens the panel becomes a full-width sheet under SillyTavern's top bar,
+  leaving the send box visible. Tap the header or swipe up/down to fold and unfold it,
+  or tap the grip at the bottom to fold it
+- Tap anything for its details: gauge segments, the reply reserve, lorebook entries.
+  Tap a category to highlight it, and tap again to dismiss
+- Slide a finger along the history strip to inspect messages one by one; tap the
+  selected bar again to jump to that message (the sheet folds out of the way)
+- Buttons and section headers grow to finger-sized targets on touch screens
+
 ## Notes
 
 - Chat Completion APIs only (OpenAI-compatible, Claude, etc.). Text Completion is not supported.

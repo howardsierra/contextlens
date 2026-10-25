@@ -40,6 +40,7 @@
     line-height: 1.4;
     overflow: hidden;
     resize: both;
+    -webkit-tap-highlight-color: transparent;
 }
 
 #ctxlens_panel.ctxlens-open {
@@ -105,7 +106,7 @@
     font-size: 12px;
     transition: background .15s, color .15s;
 }
-.ctxlens-btn:hover { background: rgba(255, 255, 255, .07) !important; color: #fff !important; }
+.ctxlens-btn:active { background: rgba(255, 255, 255, .1) !important; }
 .ctxlens-collapse i { transition: transform .2s; }
 
 /* thin fill bar along the bottom edge of the header, shown when collapsed */
@@ -141,6 +142,8 @@
     flex: 1 1 auto;
     scrollbar-width: thin;
     scrollbar-color: var(--cl-line) transparent;
+    overscroll-behavior: contain; /* don't scroll the chat behind the panel */
+    -webkit-overflow-scrolling: touch;
 }
 
 #ctxlens_panel:not(.ctxlens-has-data) .ctxlens-content,
@@ -178,7 +181,6 @@
     color: var(--cl-muted) !important;
     padding: 2px 2px 6px !important;
 }
-.ctxlens-h:hover { color: var(--cl-text-2) !important; }
 .ctxlens-h-count {
     margin-left: auto;
     color: var(--cl-faint);
@@ -313,7 +315,6 @@
     border-radius: 6px;
     transition: opacity .15s, background .15s;
 }
-.ctxlens-row:hover { background: rgba(255, 255, 255, .03); }
 .ctxlens-row-zero { opacity: .45; }
 .ctxlens-dot { width: 9px; height: 9px; border-radius: 3px; flex: 0 0 auto; }
 .ctxlens-row-label { flex: 0 0 108px; color: var(--cl-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -403,6 +404,7 @@
     height: 60px;
     padding: 4px 2px 0;
     border-bottom: 1px solid var(--cl-line);
+    touch-action: pan-y; /* horizontal finger moves scrub, vertical ones scroll */
 }
 .ctxlens-bar {
     flex: 1;
@@ -412,7 +414,11 @@
     transition: filter .15s, transform .15s;
     transform-origin: bottom;
 }
-.ctxlens-bar:hover { filter: brightness(1.35); transform: scaleY(1.06); }
+.ctxlens-bar.is-sel {
+    filter: brightness(1.4);
+    transform: scaleY(1.08);
+    box-shadow: 0 -2px 0 #fff;
+}
 .ctxlens-bar.in.ai,      .ctxlens-bar.unknown.ai   { background: #4ECDC4; }
 .ctxlens-bar.in.user,    .ctxlens-bar.unknown.user { background: #8B7CFF; }
 .ctxlens-bar.unknown { opacity: .5; }
@@ -458,6 +464,7 @@
     color: var(--cl-muted);
 }
 .ctxlens-strip-hint { margin-left: auto; color: var(--cl-faint); font-style: italic; }
+.ctxlens-hint-touch { display: none; }
 .ctxlens-strip-legend .sw {
     display: inline-block;
     width: 9px;
@@ -485,6 +492,71 @@
     margin-top: 4px;
 }
 
+/* ---------- tooltip (works for hover and tap) ---------- */
+.ctxlens-tip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    max-width: min(260px, calc(100% - 12px));
+    padding: 5px 9px;
+    border-radius: 7px;
+    background: #0D0F15;
+    border: 1px solid #343949;
+    color: var(--cl-text);
+    font-size: 11.5px;
+    line-height: 1.35;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .12s, visibility 0s .12s;
+}
+.ctxlens-tip.show { opacity: 1; visibility: visible; transition: opacity .12s; }
+
+/* ---------- phone sheet grip (hidden on desktop) ---------- */
+.ctxlens-grip {
+    display: none;
+    justify-content: center;
+    align-items: center;
+    flex: 0 0 auto;
+    height: 22px;
+    cursor: pointer;
+    touch-action: none;
+    border-top: 1px solid var(--cl-line-soft);
+}
+.ctxlens-grip span {
+    width: 42px;
+    height: 4px;
+    border-radius: 2px;
+    background: #3A4052;
+}
+
+/* ---------- hover affordances: real pointers only ---------- */
+@media (hover: hover) {
+    .ctxlens-btn:hover { background: rgba(255, 255, 255, .07) !important; color: #fff !important; }
+    .ctxlens-h:hover { color: var(--cl-text-2) !important; }
+    .ctxlens-row:hover { background: rgba(255, 255, 255, .03); }
+    .ctxlens-bar:hover { filter: brightness(1.35); transform: scaleY(1.06); }
+}
+
+/* ---------- touch screens: bigger targets ---------- */
+@media (hover: none), (pointer: coarse) {
+    .ctxlens-hint-mouse { display: none; }
+    .ctxlens-hint-touch { display: inline; }
+}
+@media (pointer: coarse) {
+    .ctxlens-head { padding: 5px 6px 5px 14px; }
+    .ctxlens-btn { width: 40px; height: 40px; font-size: 15px; border-radius: 10px; }
+    .ctxlens-pill { font-size: 12px; padding: 3px 10px; }
+    .ctxlens-h { min-height: 40px; padding: 4px 2px !important; font-size: 11.5px !important; }
+    .ctxlens-collapsed .ctxlens-h { padding-bottom: 4px !important; margin-bottom: 4px; }
+    .ctxlens-row { padding: 6px 4px; }
+    .ctxlens-strip { height: 76px; gap: 1px; }
+    .ctxlens-chip { line-height: 22px; padding: 0 10px; font-size: 11px; }
+    .ctxlens-bar.out { border-width: 1.5px; }
+}
+
 /* ---------- chat message flash when jumping from the strip ---------- */
 #chat .mes.ctxlens-flash { animation: ctxlens-flash 1.5s ease-out; }
 @keyframes ctxlens-flash {
@@ -502,6 +574,39 @@
     }
 }
 
-@media (max-width: 480px) {
-    #ctxlens_panel { width: calc(100vw - 12px) !important; right: 6px; top: 52px; resize: none; }
+/* ---------- phones: a full-width sheet under SillyTavern's top bar ----------
+   Keep the breakpoint in sync with sheetQuery in index.js. Saved desktop
+   position/size (inline styles) are overridden here. */
+@media (max-width: 600px) {
+    #ctxlens_panel {
+        top: var(--topBarBlockSize, 48px) !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: auto !important;
+        height: auto !important;
+        min-width: 0;
+        max-width: none;
+        max-height: calc(100vh - var(--topBarBlockSize, 48px) - 80px);
+        max-height: calc(100dvh - var(--topBarBlockSize, 48px) - 80px); /* leave the send box visible */
+        border-radius: 0 0 18px 18px;
+        border-top: 0;
+        border-left: 0;
+        border-right: 0;
+        resize: none;
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+        font-size: 14px;
+    }
+    #ctxlens_panel.ctxlens-open { animation: ctxlens-drop .22s ease-out; }
+    #ctxlens_panel.ctxlens-min { border-radius: 0 0 12px 12px; }
+    .ctxlens-head { cursor: pointer; }
+    .ctxlens-grip { display: flex; }
+    .ctxlens-min .ctxlens-grip { display: none; }
+    .ctxlens-row-label { flex-basis: 118px; }
+    .ctxlens-donut { width: 92px; height: 92px; }
+}
+
+@keyframes ctxlens-drop {
+    from { transform: translateY(-24px); opacity: 0; }
+    to   { transform: none; opacity: 1; }
 }

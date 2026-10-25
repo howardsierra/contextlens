@@ -56,6 +56,9 @@
 
     const tokenCache = new Map();
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    // Keep in sync with the sheet breakpoint in style.css
+    const sheetQuery = window.matchMedia?.('(max-width: 600px)');
+    const isSheet = () => !!sheetQuery?.matches;
 
     /* ------------------------------------------------------------------ */
     /* Helpers                                                             */
@@ -446,7 +449,10 @@
                         <span><i class="sw ai"></i>AI</span>
                         <span><i class="sw out"></i>dropped</span>
                         <span><i class="sw hidden"></i>hidden</span>
-                        <span class="ctxlens-strip-hint">click a bar to jump</span>
+                        <span class="ctxlens-strip-hint">
+                            <span class="ctxlens-hint-mouse">click a bar to jump</span>
+                            <span class="ctxlens-hint-touch">tap or slide to inspect</span>
+                        </span>
                     </div>`)}
                 ${section('trend', 'Fill over recent sends', '<div data-f="trend"></div>')}
             </div>`;
@@ -459,12 +465,12 @@
             const keys = e.constant
                 ? '<span class="ctxlens-chip ctxlens-chip-const">constant</span>'
                 : e.keys.slice(0, 4).map(k => `<span class="ctxlens-chip">${esc(k)}</span>`).join('')
-                  + (e.keys.length > 4 ? `<span class="ctxlens-chip ctxlens-chip-more" title="${esc(e.keys.slice(4).join(', '))}">+${e.keys.length - 4}</span>` : '');
+                  + (e.keys.length > 4 ? `<span class="ctxlens-chip ctxlens-chip-more" data-tip="${esc(e.keys.slice(4).join(', '))}">+${e.keys.length - 4}</span>` : '');
             const title = e.hit
                 ? `${e.tokens} tokens${e.world ? ` · ${e.world}` : ''}`
                 : 'Activated, but not found in the prompt (budget cap, filters, or macros)';
             return `
-                <div class="ctxlens-wi ${e.hit ? '' : 'ctxlens-wi-miss'}" title="${esc(title)}">
+                <div class="ctxlens-wi ${e.hit ? '' : 'ctxlens-wi-miss'}" data-tip="${esc(title)}">
                     <div class="ctxlens-wi-line">
                         <span class="ctxlens-wi-name">${esc(e.comment)}</span>
                         ${e.world ? `<span class="ctxlens-wi-world">${esc(e.world)}</span>` : ''}
@@ -499,16 +505,16 @@
     function renderStrip(a) {
         const maxTok = Math.max(...a.strip.map(s => s.tokens), 1);
         let html = a.stripStart > 0
-            ? `<div class="ctxlens-strip-more" title="${a.stripStart} earlier messages not shown">+${a.stripStart}</div>`
+            ? `<div class="ctxlens-strip-more" data-tip="${a.stripStart} earlier messages not shown">+${a.stripStart}</div>`
             : '';
         a.strip.forEach((s, n) => {
             const prev = a.strip[n - 1];
             if (s.status === 'in' && prev && prev.status !== 'in' && s.index === a.oldestIncluded) {
-                html += `<div class="ctxlens-cut" title="Context cut-off"></div>`;
+                html += `<div class="ctxlens-cut" data-tip="Context cut-off"></div>`;
             }
             const label = { in: 'in context', out: 'dropped', hidden: 'hidden', unknown: 'unknown' }[s.status];
             html += `<div class="ctxlens-bar ${s.status} ${s.isUser ? 'user' : 'ai'}" data-mes="${s.index}"
-                title="#${s.index + 1} · ${s.tokens} tok · ${label}"
+                data-tip="#${s.index + 1} · ${s.tokens} tok · ${label}"
                 style="height:${Math.max(8, (s.tokens / maxTok) * 100)}%"></div>`;
         });
         return html;
@@ -544,6 +550,7 @@
         const p = panel();
         if (!p || !settings().open) return;
         const a = lastAnalysis;
+        clearInspect(p);
         p.classList.toggle('ctxlens-has-data', !!a);
         const pill = p.querySelector('.ctxlens-pill');
         const mini = p.querySelector('.ctxlens-mini i');
@@ -579,7 +586,7 @@
         } else {
             d.textContent = `${a.delta > 0 ? '+' : '−'}${fmt(Math.abs(a.delta))}`;
             d.className = `ctxlens-delta ${a.delta > 0 ? 'up' : 'down'}`;
-            d.title = 'Change since the last send';
+            d.dataset.tip = 'Change since the last send';
         }
 
         /* --- stacked gauge: segments scaled to the full window --- */
@@ -588,12 +595,12 @@
             const t = a.totals[seg.dataset.cat];
             seg.style.width = `${(t / denom) * 100}%`;
             seg.style.display = t > 0 ? '' : 'none';
-            seg.title = `${CATS[seg.dataset.cat].label}: ${t} tokens`;
+            seg.dataset.tip = `${CATS[seg.dataset.cat].label}: ${t} tokens`;
         }
         const res = p.querySelector('.ctxlens-reserve');
         res.style.width = `${(a.reserve / denom) * 100}%`;
         res.classList.toggle('ctxlens-reserve-hit', a.used > a.budget);
-        res.title = a.used > a.budget
+        res.dataset.tip = a.used > a.budget
             ? `Prompt overlaps the ${a.reserve}-token reply reserve — SillyTavern will trim history`
             : `${a.reserve} tokens reserved for the reply`;
 
@@ -639,11 +646,60 @@
         el.style.top = `${y}px`;
     }
 
+    /* -- inspect: hover with a mouse, tap with touch ------------------- */
+
     function highlight(el, cat) {
+        el._hlCat = cat;
         el.classList.toggle('ctxlens-hl', !!cat);
         for (const n of el.querySelectorAll('[data-cat]')) {
             n.classList.toggle('is-hl', n.dataset.cat === cat);
         }
+    }
+
+    /** Show the in-panel tooltip above (or below) `target`. */
+    function showTip(el, target, extra = '') {
+        const tip = el.querySelector('.ctxlens-tip');
+        tip.textContent = target.dataset.tip + extra;
+        tip.classList.add('show');
+        el._tipTarget = target;
+        const pr = el.getBoundingClientRect();
+        const tr = target.getBoundingClientRect();
+        const x = Math.max(6, Math.min(pr.width - tip.offsetWidth - 6,
+            tr.left + tr.width / 2 - pr.left - tip.offsetWidth / 2));
+        let y = tr.top - pr.top - tip.offsetHeight - 6;
+        const below = y < el.querySelector('.ctxlens-head').offsetHeight;
+        if (below) y = tr.bottom - pr.top + 6;
+        tip.classList.toggle('below', below);
+        tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    }
+
+    function hideTip(el) {
+        el._tipTarget = null;
+        el.querySelector('.ctxlens-tip')?.classList.remove('show');
+    }
+
+    function selectBar(el, bar) {
+        highlight(el, null);
+        for (const b of el.querySelectorAll('.ctxlens-bar.is-sel')) b.classList.remove('is-sel');
+        bar.classList.add('is-sel');
+        showTip(el, bar, ' · tap again to jump');
+    }
+
+    function clearInspect(el) {
+        highlight(el, null);
+        hideTip(el);
+        for (const b of el.querySelectorAll('.ctxlens-bar.is-sel')) b.classList.remove('is-sel');
+    }
+
+    /** The strip bar under a horizontal position (nearest one if between bars). */
+    function barAt(strip, x) {
+        let best = null, bestD = Infinity;
+        for (const b of strip.querySelectorAll('.ctxlens-bar')) {
+            const r = b.getBoundingClientRect();
+            const d = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+            if (d < bestD) { best = b; bestD = d; }
+        }
+        return best;
     }
 
     function jumpToMessage(i) {
@@ -652,6 +708,9 @@
             window.toastr?.info(`Message #${i + 1} isn't loaded in the chat view.`, 'Context Lens');
             return;
         }
+        // On phones the sheet covers the chat — fold it so the message is visible
+        const el = panel();
+        if (el && isSheet()) collapse(el, true);
         mes.scrollIntoView({ block: 'center', behavior: reducedMotion?.matches ? 'auto' : 'smooth' });
         mes.classList.remove('ctxlens-flash');
         void mes.offsetWidth; // restart the animation
@@ -663,7 +722,16 @@
         el.classList.toggle('ctxlens-min', collapsed);
         const btn = el.querySelector('.ctxlens-collapse');
         btn.title = collapsed ? 'Expand' : 'Collapse';
+        btn.setAttribute('aria-label', btn.title);
         btn.setAttribute('aria-expanded', String(!collapsed));
+        if (collapsed) clearInspect(el);
+    }
+
+    function collapse(el, collapsed) {
+        const st = settings();
+        st.collapsed = collapsed ?? !st.collapsed;
+        setCollapsed(el, st.collapsed);
+        ctx().saveSettingsDebounced();
     }
 
     function buildPanel() {
@@ -679,11 +747,13 @@
                 <span class="ctxlens-pill" title="Prompt budget used">—</span>
                 <span class="ctxlens-head-btns">
                     <button type="button" class="ctxlens-btn ctxlens-collapse"><i class="fa-solid fa-chevron-up"></i></button>
-                    <button type="button" class="ctxlens-btn ctxlens-close" title="Close"><i class="fa-solid fa-xmark"></i></button>
+                    <button type="button" class="ctxlens-btn ctxlens-close" title="Close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
                 </span>
                 <span class="ctxlens-mini"><i></i></span>
             </div>
-            <div class="ctxlens-body">${skeleton()}</div>`;
+            <div class="ctxlens-body">${skeleton()}</div>
+            <div class="ctxlens-grip" title="Swipe up to fold"><span></span></div>
+            <div class="ctxlens-tip" role="tooltip"></div>`;
         document.body.appendChild(el);
 
         if (s.x !== null && s.y !== null) {
@@ -696,15 +766,20 @@
         setCollapsed(el, s.collapsed);
 
         el.querySelector('.ctxlens-close').addEventListener('click', () => togglePanel(false));
-        el.querySelector('.ctxlens-collapse').addEventListener('click', () => {
-            const st = settings();
-            st.collapsed = !st.collapsed;
-            setCollapsed(el, st.collapsed);
-            ctx().saveSettingsDebounced();
-        });
+        el.querySelector('.ctxlens-collapse').addEventListener('click', () => collapse(el));
+        el.addEventListener('keydown', (e) => { if (e.key === 'Escape') togglePanel(false); });
 
-        // Collapsible sections
+        // What kind of pointer started the current interaction. Hover
+        // affordances are mouse-only; touch and pen get tap-to-inspect.
+        let pointer = 'mouse';
+        let suppressClick = false;
+        el.addEventListener('pointerdown', (e) => { pointer = e.pointerType || 'mouse'; }, true);
+        const touchy = () => pointer !== 'mouse';
+
         el.addEventListener('click', (e) => {
+            if (suppressClick) { suppressClick = false; return; }
+
+            // Collapsible sections
             const h = e.target.closest('.ctxlens-h');
             if (h) {
                 const group = h.closest('.ctxlens-group');
@@ -712,21 +787,71 @@
                 h.setAttribute('aria-expanded', String(!collapsed));
                 settings().sections[group.dataset.section] = collapsed;
                 ctx().saveSettingsDebounced();
+                hideTip(el);
                 return;
             }
+
+            // Strip bars: click jumps; on touch the first tap inspects
             const bar = e.target.closest('.ctxlens-bar');
-            if (bar) jumpToMessage(Number(bar.dataset.mes));
+            if (bar) {
+                if (!touchy() || bar.classList.contains('is-sel')) jumpToMessage(Number(bar.dataset.mes));
+                else selectBar(el, bar);
+                return;
+            }
+
+            if (!touchy() || e.target.closest('.ctxlens-head, .ctxlens-grip')) return;
+
+            // Touch: tap a category or a detail to inspect it, tap again to dismiss
+            const tipEl = e.target.closest('[data-tip]');
+            const cat = e.target.closest('[data-cat]')?.dataset.cat ?? null;
+            const same = tipEl ? tipEl === el._tipTarget : (cat && cat === el._hlCat);
+            clearInspect(el);
+            if (same) return;
+            if (cat) highlight(el, cat);
+            if (tipEl) showTip(el, tipEl);
         });
 
-        // Hover a category anywhere → highlight it in the gauge and the list
+        // Mouse: hover a category anywhere → highlight it in the gauge and list
         el.addEventListener('pointerover', (e) => {
+            if (e.pointerType !== 'mouse') return;
             highlight(el, e.target.closest('[data-cat]')?.dataset.cat ?? null);
+            const t = e.target.closest('[data-tip]');
+            if (t) showTip(el, t); else hideTip(el);
         });
-        el.addEventListener('pointerleave', () => highlight(el, null));
+        el.addEventListener('pointerleave', (e) => {
+            if (e.pointerType === 'mouse') clearInspect(el);
+        });
+        document.addEventListener('pointerdown', (e) => {
+            if (!el.contains(e.target)) clearInspect(el);
+        });
+        el.querySelector('.ctxlens-body').addEventListener('scroll', () => hideTip(el), { passive: true });
 
-        // Drag by header
+        // Touch: scrub a finger along the history strip to inspect messages
+        const strip = el.querySelector('.ctxlens-strip');
+        let scrub = null;
+        strip.addEventListener('pointerdown', (e) => {
+            if (e.pointerType !== 'mouse') scrub = { x: e.clientX, moved: false };
+        });
+        strip.addEventListener('pointermove', (e) => {
+            if (!scrub) return;
+            if (!scrub.moved && Math.abs(e.clientX - scrub.x) < 8) return;
+            scrub.moved = true;
+            const bar = barAt(strip, e.clientX);
+            if (bar && !bar.classList.contains('is-sel')) selectBar(el, bar);
+        });
+        strip.addEventListener('pointerup', () => {
+            if (scrub?.moved) {
+                suppressClick = true; // the lift ends a scrub, it isn't a tap
+                setTimeout(() => { suppressClick = false; }, 350);
+            }
+            scrub = null;
+        });
+        strip.addEventListener('pointercancel', () => { scrub = null; });
+
+        // Header: drag to move on desktop; on phones tap or swipe to fold/unfold
         const head = el.querySelector('.ctxlens-head');
         let drag = null;
+        let swipe = null;
         const endDrag = () => {
             if (!drag) return;
             drag = null;
@@ -736,8 +861,17 @@
             st.y = el.offsetTop;
             ctx().saveSettingsDebounced();
         };
+        const endSwipe = (e) => {
+            if (!swipe) return false;
+            const dy = e.clientY - swipe.y;
+            swipe = null;
+            if (Math.abs(dy) < 10) collapse(el);    // tap toggles
+            else collapse(el, dy < 0);              // swipe up folds, down unfolds
+            return true;
+        };
         head.addEventListener('pointerdown', (e) => {
             if (e.target.closest('button') || e.button !== 0) return;
+            if (isSheet()) { swipe = { y: e.clientY }; return; }
             drag = { dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop };
             el.classList.add('ctxlens-dragging');
             head.setPointerCapture(e.pointerId);
@@ -750,8 +884,21 @@
             el.style.top = `${Math.min(maxY, Math.max(0, e.clientY - drag.dy))}px`;
             el.style.right = 'auto';
         });
-        head.addEventListener('pointerup', endDrag);
-        head.addEventListener('pointercancel', endDrag);
+        head.addEventListener('pointerup', (e) => { if (!endSwipe(e)) endDrag(); });
+        head.addEventListener('pointercancel', () => { swipe = null; endDrag(); });
+        head.addEventListener('dblclick', (e) => {
+            if (!isSheet() && !e.target.closest('button')) collapse(el);
+        });
+
+        // Bottom grip of the phone sheet: tap or swipe up to fold
+        const grip = el.querySelector('.ctxlens-grip');
+        let gripY = null;
+        grip.addEventListener('pointerdown', (e) => { gripY = e.clientY; });
+        grip.addEventListener('pointerup', (e) => {
+            if (gripY !== null && e.clientY - gripY < 10) collapse(el, true);
+            gripY = null;
+        });
+        grip.addEventListener('pointercancel', () => { gripY = null; });
 
         // Persist size after the user drags the resize handle
         if (window.ResizeObserver) {
@@ -759,7 +906,7 @@
             new ResizeObserver(() => {
                 clearTimeout(t);
                 t = setTimeout(() => {
-                    if (!el.style.width && !el.style.height) return;
+                    if (isSheet() || (!el.style.width && !el.style.height)) return;
                     const st = settings();
                     st.w = el.style.width || null;
                     st.h = el.style.height || null;
@@ -768,7 +915,8 @@
             }).observe(el);
         }
 
-        window.addEventListener('resize', () => clampToViewport(el));
+        window.addEventListener('resize', () => { clampToViewport(el); hideTip(el); });
+        sheetQuery?.addEventListener?.('change', () => { clampToViewport(el); clearInspect(el); });
     }
 
     function togglePanel(force) {
